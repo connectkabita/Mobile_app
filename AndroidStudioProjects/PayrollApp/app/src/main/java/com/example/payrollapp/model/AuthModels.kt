@@ -2,6 +2,7 @@ package com.example.payrollapp.model
 
 import com.google.gson.annotations.SerializedName
 
+// --- Login Models ---
 data class LoginRequest(
     val username: String,
     val password: String
@@ -17,6 +18,7 @@ data class AuthResponse(
     val role: String?
 )
 
+// --- Signup Models ---
 data class SignupRequest(
     val username: String,
     val email: String,
@@ -34,4 +36,19 @@ data class SignupRequest(
     val maritalStatus: String,
     @SerializedName("positionId") val positionId: Int = 1,
     @SerializedName("departmentId") val departmentId: Int = 1
+)
+
+// --- Forgot/Reset Password Models ---
+data class ForgotPasswordRequest(
+    val email: String
+)
+
+data class ResetPasswordRequest(
+    val email: String,
+    val newPassword: String
+)
+
+data class GeneralResponse(
+    val success: Boolean,
+    val message: String
 )

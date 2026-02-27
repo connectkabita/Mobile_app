@@ -7,7 +7,9 @@ import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.example.payrollapp.R
-import com.example.payrollapp.model.AttendanceLog
+import com.example.payrollapp.model.AttendanceLog // Added Import
+import java.text.SimpleDateFormat
+import java.util.*
 
 class AttendanceAdapter(private var logs: List<AttendanceLog>) :
     RecyclerView.Adapter<AttendanceAdapter.AttendanceViewHolder>() {
@@ -27,20 +29,40 @@ class AttendanceAdapter(private var logs: List<AttendanceLog>) :
 
     override fun onBindViewHolder(holder: AttendanceViewHolder, position: Int) {
         val log = logs[position]
-        holder.tvDate.text = log.date ?: "N/A"
-        holder.tvStatus.text = log.status ?: "UNKNOWN"
-        holder.tvTimeIn.text = "In: ${log.clockIn ?: "--:--"}"
-        holder.tvTimeOut.text = "Out: ${log.clockOut ?: "--:--"}"
 
-        // Using hex strings or System colors to avoid "Unresolved reference" errors
-        if (log.status == "PRESENT") {
-            holder.tvStatus.setTextColor(Color.parseColor("#2E7D32")) // Dark Green
-        } else {
-            holder.tvStatus.setTextColor(Color.parseColor("#C62828")) // Dark Red
+        // Match the field names from our updated AttendanceLog model
+        holder.tvDate.text = log.attendanceDate
+        holder.tvStatus.text = log.status
+
+        // Format the ISO timestamps (2026-02-26T09:30:00) to readable time (09:30 AM)
+        holder.tvTimeIn.text = "In: ${formatToTime(log.checkInTime)}"
+        holder.tvTimeOut.text = "Out: ${formatToTime(log.checkOutTime)}"
+
+        // Status-based coloring
+        when (log.status) {
+            "PRESENT" -> holder.tvStatus.setTextColor(Color.parseColor("#2E7D32")) // Green
+            "LATE" -> holder.tvStatus.setTextColor(Color.parseColor("#F9A825"))    // Orange
+            else -> holder.tvStatus.setTextColor(Color.parseColor("#C62828"))      // Red
         }
     }
 
     override fun getItemCount() = logs.size
+
+    /**
+     * Helper to convert API timestamp to readable time
+     */
+    private fun formatToTime(timestamp: String?): String {
+        if (timestamp.isNullOrEmpty()) return "--:--"
+        return try {
+            val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+            val formatter = SimpleDateFormat("hh:mm a", Locale.getDefault())
+            val date = parser.parse(timestamp)
+            date?.let { formatter.format(it) } ?: "--:--"
+        } catch (e: Exception) {
+            // Check if it's already in a simple HH:mm:ss format
+            timestamp ?: "--:--"
+        }
+    }
 
     fun updateData(newLogs: List<AttendanceLog>) {
         this.logs = newLogs

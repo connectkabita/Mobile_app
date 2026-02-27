@@ -13,7 +13,9 @@ import com.example.payrollapp.model.LoginRequest
 import com.example.payrollapp.network.RetrofitClient
 import com.example.payrollapp.network.LoginRepository
 import com.example.payrollapp.utils.SessionManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
@@ -24,17 +26,20 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_login)
 
-        // IMPORTANT: Initialize Retrofit with context so it can access saved tokens
+        // Initialize Retrofit and SessionManager
         RetrofitClient.init(this)
 
-        // 1. Initialize logic components
+        // FIXED: RetrofitClient.instance now returns ApiService,
+        // which matches the updated LoginRepository constructor.
         loginRepository = LoginRepository(RetrofitClient.instance)
         sessionManager = SessionManager(this)
 
+        // UI References
         val usernameField = findViewById<EditText>(R.id.etUsername)
         val passwordField = findViewById<EditText>(R.id.etPassword)
         val loginButton = findViewById<Button>(R.id.btnLogin)
         val signupText = findViewById<TextView>(R.id.tvSignup)
+        val forgotPasswordText = findViewById<TextView>(R.id.tvForgotPassword)
 
         loginButton.setOnClickListener {
             val user = usernameField.text.toString().trim()
@@ -50,6 +55,11 @@ class MainActivity : AppCompatActivity() {
         signupText.setOnClickListener {
             startActivity(Intent(this, SignupActivity::class.java))
         }
+
+        // OTP-only Forgot Password flow (No reset password logic)
+        forgotPasswordText.setOnClickListener {
+            startActivity(Intent(this, ForgotPasswordActivity::class.java))
+        }
     }
 
     private fun performLogin(user: String, pass: String) {
@@ -57,10 +67,12 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
-                val authResponse = loginRepository.login(loginData)
+                // Execute network call on IO thread
+                val authResponse = withContext(Dispatchers.IO) {
+                    loginRepository.login(loginData)
+                }
 
                 if (authResponse != null && authResponse.token != null) {
-                    // Save credentials to SessionManager
                     sessionManager.saveAuthToken(authResponse.token)
                     authResponse.empId?.let { sessionManager.saveEmployeeId(it) }
 
@@ -73,7 +85,7 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this@MainActivity, "Invalid Username or Password", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity, "Connection Error: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }

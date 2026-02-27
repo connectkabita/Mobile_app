@@ -4,14 +4,15 @@ import com.google.gson.annotations.SerializedName
 
 /**
  * 1. Data sent to the server when punching (Clock In/Out)
+ * Updated to match AttendanceFragment.kt usage
  */
 data class AttendanceRequest(
-    @SerializedName("empId")
-    val employeeId: Int,
+    val empId: Int, // Fixed: Changed from employeeId to empId
     val latitude: Double,
     val longitude: Double,
-    val type: String, // Expected: "CLOCK_IN" or "CLOCK_OUT"
-    val timestamp: String
+    val status: String, // Fixed: Changed from type to status
+    val checkInTime: String, // Fixed: Changed from timestamp to checkInTime
+    val attendanceDate: String // Added to fix "No value passed for parameter" error
 )
 
 /**
@@ -27,19 +28,19 @@ data class AttendanceResponse(
 
 /**
  * 3. Individual record for the Attendance History list
+ * Updated to match AttendanceAdapter.kt usage
  */
 data class AttendanceLog(
-    val attendanceId: Int?,
-    val date: String,
-    val clockIn: String?,
-    val clockOut: String?,
+    val attendanceId: Long?, // Fixed: Changed to Long to fix Type Mismatch error
+    val attendanceDate: String, // Fixed: Changed from date to attendanceDate
+    val checkInTime: String?, // Fixed: Changed from clockIn to checkInTime
+    val checkOutTime: String?, // Fixed: Changed from clockOut to checkOutTime
     val totalHours: Double?,
     val status: String // e.g., "PRESENT", "LATE", "ABSENT"
 )
 
 /**
  * 4. Wrapper for the history list response
- * Use this if your backend returns: { "logs": [...] }
  */
 data class AttendanceHistoryResponse(
     val logs: List<AttendanceLog>

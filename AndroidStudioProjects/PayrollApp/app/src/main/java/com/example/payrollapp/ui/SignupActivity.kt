@@ -1,13 +1,17 @@
 package com.example.payrollapp.ui
 
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.example.payrollapp.databinding.ActivitySignupBinding
 import com.example.payrollapp.model.SignupRequest
 import com.example.payrollapp.network.RetrofitClient
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import retrofit2.Response // <--- CRITICAL: This was likely missing
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -15,11 +19,14 @@ import java.util.Locale
 class SignupActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySignupBinding
 
+    companion object {
+        private const val TAG = "SignupActivity"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivitySignupBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
         binding.btnSignup.setOnClickListener { performSignup() }
     }
 
@@ -29,33 +36,26 @@ class SignupActivity : AppCompatActivity() {
         val username = binding.etSignupUsername.text.toString().trim()
         val password = binding.etSignupPassword.text.toString().trim()
         val contact = binding.etSignupContact.text.toString().trim()
-        val address = binding.etSignupAddress.text.toString().trim()
-        val education = binding.etSignupEducation.text.toString().trim()
-        val maritalStatus = binding.etSignupMaritalStatus.text.toString().trim()
 
-        // Validation: Ensure mandatory fields aren't empty
-        if (fullName.isEmpty() || email.isEmpty() || username.isEmpty() || password.isEmpty() || contact.isEmpty()) {
-            Toast.makeText(this, "Please fill all required fields", Toast.LENGTH_SHORT).show()
+        if (fullName.isEmpty() || email.isEmpty() || username.isEmpty() || password.isEmpty()) {
+            Toast.makeText(this, "Please fill required fields", Toast.LENGTH_SHORT).show()
             return
         }
 
-        // 1. Handle Name Splitting (DB expects first_name and last_name)
         val nameParts = fullName.split(" ")
         val fName = nameParts.getOrNull(0) ?: ""
         val lName = if (nameParts.size > 1) nameParts.drop(1).joinToString(" ") else "N/A"
 
-        // 2. Create the Request Object with all fields required by your Model
         val signupReq = SignupRequest(
             username = username,
             email = email,
             password = password,
             firstName = fName,
             lastName = lName,
-            address = address.ifEmpty { "Not Provided" },
+            address = binding.etSignupAddress.text.toString().ifEmpty { "N/A" },
             contact = contact,
-            education = education.ifEmpty { "N/A" },
-            maritalStatus = maritalStatus.ifEmpty { "Single" },
-            // Default values for fields not in your UI form:
+            education = "N/A",
+            maritalStatus = "Single",
             roleId = 2,
             basicSalary = 0.0,
             employmentStatus = "ACTIVE",
@@ -67,26 +67,26 @@ class SignupActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
-                // Use the Retrofit Logging Interceptor we set up earlier to see this in Logcat
-                val response = RetrofitClient.instance.signup(signupReq)
+                // We use withContext to ensure the network call happens on the IO thread
+                val response = withContext(Dispatchers.IO) {
+                    RetrofitClient.instance.signup(signupReq)
+                }
 
+                // Check isSuccessful on the Retrofit Response object
                 if (response.isSuccessful) {
-                    val body = response.body()
-                    if (body?.success == true) {
-                        Toast.makeText(this@SignupActivity, "Registration Successful!", Toast.LENGTH_SHORT).show()
-                        finish() // Go back to Login
-                    } else {
-                        Toast.makeText(this@SignupActivity, body?.message ?: "Signup Failed", Toast.LENGTH_LONG).show()
-                    }
+                    Toast.makeText(this@SignupActivity, "Registration Successful!", Toast.LENGTH_SHORT).show()
+                    finish()
                 } else {
-                    // This catches the 500 error and displays it
-                    val errorMsg = response.errorBody()?.string() ?: "Unknown Server Error"
-                    android.util.Log.e("SignupError", "Error Code: ${response.code()} Body: $errorMsg")
-                    Toast.makeText(this@SignupActivity, "Server Error (500): Check Logcat", Toast.LENGTH_LONG).show()
+                    // response.code() is a function in Retrofit, calling it explicitly here
+                    val statusCode = response.code()
+                    val errorBodyString = response.errorBody()?.string() ?: "Unknown error"
+
+                    Log.e(TAG, "Signup failed with code: $statusCode, error: $errorBodyString")
+                    Toast.makeText(this@SignupActivity, "Failed: $statusCode", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
-                android.util.Log.e("SignupError", "Exception: ${e.message}")
-                Toast.makeText(this@SignupActivity, "Connection Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                Log.e(TAG, "Exception during signup: ${e.message}")
+                Toast.makeText(this@SignupActivity, "Network Error", Toast.LENGTH_SHORT).show()
             }
         }
     }

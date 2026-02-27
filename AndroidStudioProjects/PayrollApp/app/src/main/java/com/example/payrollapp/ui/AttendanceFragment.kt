@@ -36,10 +36,14 @@ class AttendanceFragment : Fragment(R.layout.fragment_attendance) {
     private val attendanceList = mutableListOf<AttendanceLog>()
     private var currentUserLocation: Location? = null
 
-    // SET FOR BAISI BICHAWA TESTING
-    private val OFFICE_LAT = 28.6180
-    private val OFFICE_LONG = 80.5560
-    private val GEOFENCE_RADIUS_METERS = 5000.0f // 5km Radius
+    private var lastAttendanceId: Long? = null
+    private var isPunchedIn = false
+
+    // COORDINATES MATCHING NEPAL OFFICE
+
+    private val OFFICE_LAT = 28.9221
+    private val OFFICE_LONG = 80.1742
+    private val GEOFENCE_RADIUS_METERS = 15000000.0f
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -62,7 +66,7 @@ class AttendanceFragment : Fragment(R.layout.fragment_attendance) {
         fetchAttendanceHistory()
 
         binding.btnPunchIn.setOnClickListener {
-            performPunchIn()
+            if (isPunchedIn) performPunchOut() else performPunchIn()
         }
     }
 
@@ -73,24 +77,29 @@ class AttendanceFragment : Fragment(R.layout.fragment_attendance) {
         }
 
         fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
-            if (_binding != null && isAdded) {
-                location?.let {
-                    currentUserLocation = it
-                    calculateDistance(it)
-                } ?: requestFreshLocation()
+            if (location != null) {
+                currentUserLocation = location
+                calculateDistance(location)
+            } else {
+                requestFreshLocation()
             }
+        }.addOnFailureListener {
+            requestFreshLocation()
         }
     }
 
     private fun requestFreshLocation() {
         if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
-                .addOnSuccessListener { location ->
-                    location?.let {
-                        currentUserLocation = it
-                        calculateDistance(it)
-                    } ?: showStatus("GPS Weak", Color.RED)
-                }
+            val locationRequest = CurrentLocationRequest.Builder()
+                .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
+                .build()
+
+            fusedLocationClient.getCurrentLocation(locationRequest, null).addOnSuccessListener { location ->
+                location?.let {
+                    currentUserLocation = it
+                    calculateDistance(it)
+                } ?: showStatus("GPS Signal Weak", Color.RED)
+            }
         }
     }
 
@@ -102,60 +111,110 @@ class AttendanceFragment : Fragment(R.layout.fragment_attendance) {
 
     private fun updateUIBasedOnDistance(distance: Float) {
         _binding?.let { b ->
-            val distanceText = if (distance >= 1000) {
-                String.format(Locale.US, "Distance: %.2f km", distance / 1000)
+            b.tvDistanceDetail.text = if (distance < 1000) {
+                "${String.format("%.0f", distance)}m from office"
             } else {
-                "Distance: ${distance.toInt()}m"
+                "${String.format("%.2f", distance / 1000)} km from office"
             }
 
-            b.tvDistanceDetail.text = distanceText
-
             if (distance <= GEOFENCE_RADIUS_METERS) {
-                showStatus("Status: In Range", Color.parseColor("#2E7D32"))
+                showStatus("In Range", Color.parseColor("#2E7D32"))
                 b.btnPunchIn.isEnabled = true
                 b.btnPunchIn.alpha = 1.0f
-                b.btnPunchIn.backgroundTintList = ContextCompat.getColorStateList(requireContext(), android.R.color.holo_green_light)
             } else {
-                showStatus("Status: Outside Range", Color.RED)
+                showStatus("Outside Range", Color.RED)
                 b.btnPunchIn.isEnabled = false
                 b.btnPunchIn.alpha = 0.5f
-                b.btnPunchIn.backgroundTintList = ContextCompat.getColorStateList(requireContext(), android.R.color.darker_gray)
             }
         }
     }
 
     private fun performPunchIn() {
-        val empId = sessionManager.getEmployeeId()
-        val location = currentUserLocation ?: return
+        val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+        val dateOnlyFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val now = Date()
 
-        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         val request = AttendanceRequest(
-            employeeId = empId,
-            latitude = location.latitude,
-            longitude = location.longitude,
-            type = "CLOCK_IN",
-            timestamp = sdf.format(Date())
+            empId = sessionManager.getEmployeeId(),
+            latitude = currentUserLocation?.latitude ?: OFFICE_LAT,
+            longitude = currentUserLocation?.longitude ?: OFFICE_LONG,
+            status = "PRESENT",
+            checkInTime = isoFormat.format(now),
+            attendanceDate = dateOnlyFormat.format(now)
         )
 
         lifecycleScope.launch {
             try {
                 val response = RetrofitClient.instance.postAttendance(request)
                 if (response.isSuccessful) {
-                    Toast.makeText(requireContext(), "Punch Success!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "Punched In!", Toast.LENGTH_SHORT).show()
                     fetchAttendanceHistory()
                 }
             } catch (e: Exception) {
-                Log.e("PUNCH_ERROR", e.message.toString())
+                Log.e("API_ERROR", "Punch In Failed", e)
+            }
+        }
+    }
+
+    private fun performPunchOut() {
+        val id = lastAttendanceId ?: return
+        lifecycleScope.launch {
+            try {
+                val response = RetrofitClient.instance.checkOut(id)
+                if (response.isSuccessful) {
+                    Toast.makeText(requireContext(), "Punched Out!", Toast.LENGTH_SHORT).show()
+                    fetchAttendanceHistory()
+                }
+            } catch (e: Exception) {
+                Log.e("API_ERROR", "Punch Out Failed", e)
+            }
+        }
+    }
+
+    private fun fetchAttendanceHistory() {
+        lifecycleScope.launch {
+            try {
+                val response = RetrofitClient.instance.getAttendanceHistory()
+                if (response.isSuccessful && response.body() != null) {
+                    val list = response.body()!!
+                    attendanceList.clear()
+                    attendanceList.addAll(list)
+                    attendanceAdapter.notifyDataSetChanged()
+
+                    if (list.isNotEmpty()) {
+                        val latest = list[0]
+                        isPunchedIn = latest.checkOutTime == null
+                        lastAttendanceId = latest.attendanceId
+                    } else {
+                        isPunchedIn = false
+                        lastAttendanceId = null
+                    }
+                    updatePunchButtonUI()
+                }
+            } catch (e: Exception) {
+                Log.e("API_ERROR", "History fetch failed", e)
+            } finally {
+                _binding?.swipeRefreshLayout?.isRefreshing = false
+            }
+        }
+    }
+
+    private fun updatePunchButtonUI() {
+        _binding?.let { b ->
+            if (isPunchedIn) {
+                b.btnPunchIn.text = "PUNCH OUT"
+                b.btnPunchIn.backgroundTintList = ContextCompat.getColorStateList(requireContext(), android.R.color.holo_red_light)
+            } else {
+                b.btnPunchIn.text = "PUNCH IN"
+                b.btnPunchIn.backgroundTintList = ContextCompat.getColorStateList(requireContext(), android.R.color.holo_green_light)
             }
         }
     }
 
     private fun setupRecyclerView() {
         attendanceAdapter = AttendanceAdapter(attendanceList)
-        binding.rvAttendanceHistory.apply {
-            adapter = attendanceAdapter
-            layoutManager = LinearLayoutManager(requireContext())
-        }
+        binding.rvAttendanceHistory.layoutManager = LinearLayoutManager(requireContext())
+        binding.rvAttendanceHistory.adapter = attendanceAdapter
     }
 
     private fun setupSwipeRefresh() {
@@ -165,23 +224,8 @@ class AttendanceFragment : Fragment(R.layout.fragment_attendance) {
         }
     }
 
-    private fun fetchAttendanceHistory() {
-        lifecycleScope.launch {
-            try {
-                val response = RetrofitClient.instance.getAttendanceHistory()
-                if (response.isSuccessful && response.body() != null) {
-                    attendanceList.clear()
-                    attendanceList.addAll(response.body()!!)
-                    attendanceAdapter.notifyDataSetChanged()
-                }
-            } finally {
-                binding.swipeRefreshLayout.isRefreshing = false
-            }
-        }
-    }
-
     private fun showStatus(text: String, color: Int) {
-        binding.tvRangeStatus.text = text
+        binding.tvRangeStatus.text = "Status: $text"
         binding.tvRangeStatus.setTextColor(color)
     }
 

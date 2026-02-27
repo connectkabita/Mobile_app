@@ -13,7 +13,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.payrollapp.R
-import com.example.payrollapp.adapter.SalaryAdapter // <--- CRITICAL: Check this path
+import com.example.payrollapp.adapter.SalaryAdapter
 import com.example.payrollapp.databinding.FragmentSalaryBinding
 import com.example.payrollapp.network.RetrofitClient
 import com.example.payrollapp.utils.SessionManager
@@ -34,6 +34,8 @@ class SalaryFragment : Fragment(R.layout.fragment_salary) {
         sessionManager = SessionManager(requireContext())
 
         setupRecyclerView(emptyList())
+
+        // Updated to February 2026 as per current context
         fetchSalaryData(2, 2026)
 
         binding.btnDownloadSlip.setOnClickListener {
@@ -74,6 +76,7 @@ class SalaryFragment : Fragment(R.layout.fragment_salary) {
                 if (isAdded) {
                     binding.progressBar.visibility = View.GONE
                     resetCardDisplay("Network Error")
+                    Log.e("SALARY_FRAG", "Fetch error", e)
                 }
             }
         }
@@ -105,27 +108,38 @@ class SalaryFragment : Fragment(R.layout.fragment_salary) {
     }
 
     private fun downloadFile(id: Int) {
-        val token = sessionManager.getAuthToken() ?: ""
+        // FIXED: Changed getAuthToken() to getToken() to resolve compilation error
+        val token = sessionManager.getToken() ?: ""
+
+        // Use the same BASE_URL logic as RetrofitClient
         val downloadUrl = "http://10.0.2.2:8080/api/salary/download/$id"
+
         try {
             val request = DownloadManager.Request(Uri.parse(downloadUrl))
                 .setTitle("Salary Slip - $id")
+                .setDescription("Downloading Payslip PDF")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .addRequestHeader("Authorization", "Bearer $token")
+                // Note: SessionManager.getToken() already includes "Bearer " prefix now
+                .addRequestHeader("Authorization", token)
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "Payslip_$id.pdf")
+                .setAllowedOverMetered(true)
+                .setAllowedOverRoaming(true)
 
-            (requireContext().getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+            val dm = requireContext().getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            dm.enqueue(request)
             Toast.makeText(context, "Download Started", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
-            Toast.makeText(context, "Download failed", Toast.LENGTH_SHORT).show()
+            Log.e("DOWNLOAD_ERROR", "Failed to enqueue download", e)
+            Toast.makeText(context, "Download failed: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun handleInvalidSession() {
         sessionManager.logout()
-        startActivity(Intent(requireContext(), LoginActivity::class.java).apply {
+        val intent = Intent(requireContext(), LoginActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        })
+        }
+        startActivity(intent)
     }
 
     override fun onDestroyView() {
